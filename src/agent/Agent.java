@@ -18,8 +18,7 @@ public class Agent {
     private PostCash postCash; // posts in feeds shall be selected from cash
     private double postProb;
     private List<Post> feed = new ArrayList<>(); // timeline
-    private double useProb = Const.INITIAL_MEDIA_USER_RATE;
-    private double followRate;
+    private double useProb = Const.INITIAL_PU;
     private boolean traitor = false; // for further simulation like using bots
     private int timeStep;
     private boolean[] followList = new boolean[NUM_OF_AGENTS];
@@ -35,8 +34,7 @@ public class Agent {
         this.intrinsicOpinion = Math.max(-1.0, Math.min(1.0, rand.nextGaussian() * 0.6)); // norm dist
         this.opinion = this.intrinsicOpinion;
         this.bc = Const.BOUNDED_CONFIDENCE; // dynamic not static
-        this.postProb = Const.INITIAL_POST_PROB;
-        this.followRate = Const.INITIAL_FOLLOW_RATE;
+        this.postProb = Const.INITIAL_PP;
         this.timeStep = 0;
         this.recievedLikeCount = 0;
         setNumOfPosts(10);
@@ -87,10 +85,6 @@ public class Agent {
 
     public double getuseProb() {
         return this.useProb;
-    }
-
-    public double getFollowRate() {
-        return this.followRate;
     }
 
     public int getFollwerNum() {
@@ -222,7 +216,7 @@ public class Agent {
 
     public void updatePostProb() {
         // post prob is set based on the marginal utility theory
-        double increment = Const.MU_PRAM * Math.log(this.recievedLikeCount * this.recievedLikeCount + 1);
+        double increment = Const.MU_PARAM * Math.log(this.recievedLikeCount * this.recievedLikeCount + 1);
         if (increment > 1.0) {
             increment = 1.0;
         }
@@ -230,9 +224,6 @@ public class Agent {
 
         if (this.postProb > 1.0) {
             this.postProb = 1.0;
-        }
-        if (this.useProb > 1.0) {
-            this.useProb = 1.0;
         }
         this.recievedLikeCount = 0;
     }
@@ -248,12 +239,12 @@ public class Agent {
 
             postNum++;
 
-            if (Math.abs(post.getPostOpinion() - this.opinion) < 0.2) {
+            if (Math.abs(post.getPostOpinion() - this.opinion) < Const.MINIMUM_BC) {
                 comfortPostNum++;
             }
 
             if (Math.abs(post.getPostOpinion() - this.opinion) > this.bc) {
-                this.bc -= Const.DECREMENT_BC_BY_UNFOLLOW;
+                this.bc -= Const.DECREMENT_BC * decayFunc(this.timeStep);
             }
 
         }
@@ -264,10 +255,10 @@ public class Agent {
         double comfortPostRate = (double) comfortPostNum / postNum;
 
         if (comfortPostRate > Const.COMFORT_RATE) {
-            this.postProb += Const.INCREMENT_PP;
-            this.useProb += Const.INCREMENT_MUR;
+            this.postProb += Const.INCREMENT_PP * decayFunc(this.timeStep);
+            this.useProb += Const.INCREMENT_PU * decayFunc(this.timeStep);
         } else {
-            this.useProb -= Const.DECREMENT_MUR;
+            this.useProb -= Const.DECREMENT_PU * decayFunc(this.timeStep);
         }
 
         //// social influence
@@ -276,14 +267,12 @@ public class Agent {
 
         // exp : infulencer manipulation
         // use codes below instead of social influence code above
-        /*
-         * if ((this.id == 7 || this.id == 4) && this.timeStep > 2000 ) {
-         * this.opinion += 0.01; // choose some hub users for manipulation
-         * } else {
-         * this.opinion = this.tolerance * this.intrinsicOpinion + (1 - this.tolerance)
-         * * (temp / postNum);
-         * }
-         */
+
+        /*if ((this.id == 7 || this.id == 4) && this.timeStep > 1000) { // choose some hub users for manipulation
+            this.opinion += 0.01;
+        } else {
+            this.opinion = this.tolerance * this.intrinsicOpinion + (1 - this.tolerance) * (temp / postNum);
+        }*/
 
         ////
 
@@ -299,8 +288,8 @@ public class Agent {
         }
         if (this.useProb > 1.0) {
             this.useProb = 1.0;
-        } else if (this.useProb < Const.MIN_MUR) {
-            this.useProb = Const.MIN_MUR;
+        } else if (this.useProb < Const.MIN_PU) {
+            this.useProb = Const.MIN_PU;
         }
         if (this.bc < Const.MINIMUM_BC) {
             this.bc = Const.MINIMUM_BC;
@@ -359,10 +348,6 @@ public class Agent {
     }
 
     public int follow() {
-        if (rand.nextDouble() > 0.1) {
-            return -1;
-        }
-
         List<Integer> candidates = new ArrayList<>();
 
         for (Post post : this.feed) {
@@ -372,36 +357,34 @@ public class Agent {
             }
         }
 
-        if (!candidates.isEmpty()) {
+        if (!candidates.isEmpty() && rand.nextDouble() < Const.FOLLOW_PROB) {
             int followId = candidates.get(rand.nextInt(candidates.size()));
             this.followList[followId] = true;
+
             return followId;
-        } else {
-            return -1;
         }
+        return -1;
     }
 
     public int unfollow() {
-        if (rand.nextDouble() > 0.1) {
-            return -1;
-        }
-
         int followeeNum = 0;
         for (int i = 0; i < NUM_OF_AGENTS; i++) {
             if (this.followList[i]) {
                 followeeNum++;
             }
         }
-        if (this.feed.size() <= 0.0 || followeeNum <= 1) {
+        if (this.feed.size() == 0 || followeeNum <= 1) {
             return -1;
         }
 
         List<Integer> dislikeUser = new ArrayList<>();
+        if (rand.nextDouble() > Const.UNFOLLOW_PROB) {
+            return -1;
+        }
         for (Post post : this.feed) {
             if (Math.abs(post.getPostOpinion() - this.opinion) > this.bc && this.followList[post.getPostUserId()]) {
                 this.unfollowList[post.getPostUserId()] = true;
                 this.followList[post.getPostUserId()] = false;
-
                 return post.getPostUserId();
             }
             if (Math.abs(post.getPostOpinion() - this.opinion) > this.bc && !this.followList[post.getPostUserId()]) {
@@ -430,8 +413,8 @@ public class Agent {
     }
 
     public double decayFunc(double time) { // for the sake of convergence
-        double lambda = 0.0001;
-        // return Math.exp(-lambda * time);
+        double lambda = 0.0002;
+        //return Math.exp(-lambda * time);
         return 1;
     }
 
